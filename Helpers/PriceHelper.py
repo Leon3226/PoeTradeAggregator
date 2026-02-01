@@ -47,4 +47,4 @@ def getPrice(priceRaw):
         case _:
             priceMultiplier = 1
 
-    return priceRaw['amount'] * priceMultiplier;
+    return priceRaw['amount'] * priceMultiplier

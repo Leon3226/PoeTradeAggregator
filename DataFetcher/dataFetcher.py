@@ -1,83 +1,113 @@
-import httpx, time, datetime, numpy as np, json, uuid, os
+import datetime
+import json
+import os
+import time
+import uuid
 
-UA = "gradient-boost-evaluator/0.1 (contact: REDACTED_CONTACT)"
-COOKIES = {"POESESSID": "REDACTED_POESESSID"}  # or use Authorization: Bearer xyz
-BASE = "https://www.pathofexile.com"
-LEAGUE = "Rise%20of%20the%20Abyssal"  # example PoE2 league name
+import httpx
 
-os.chdir('./Data/Raw')
+USER_AGENT = "gradient-boost-evaluator/0.1 (contact: REDACTED_CONTACT)"
+COOKIES = {"POESESSID": "REDACTED_POESESSID"}
+BASE_URL = "https://www.pathofexile.com"
+LEAGUE = "Fate%20of%20the%20Vaal"
 
-def respect_limits(h):
-    # Example: X-Rate-Limit-Client: 20:5:60   X-Rate-Limit-Client-State: 3:5:10
-    rules = [h.get("x-rate-limit-account"), h.get("x-rate-limit-ip")]
-    states = [h.get("x-rate-limit-account-state"), h.get("x-rate-limit-ip-state")]
-    if not rule or not state:    
-        return
-    limit, window, _ = map(int, rule.split(",")[0].split(":"))
-    used, _, _ = map(int, state.split(",")[0].split(":"))
-    if used >= limit - 1:
-        time.sleep(window)
+SEARCH_DELAY_SECONDS = 8
+FETCH_DELAY_SECONDS = 1
+FETCH_BATCH_SIZE = 10
+MAX_TRACKED_IDS = 400
+TRACKED_IDS_TRIM_SIZE = 280
+SAVE_THRESHOLD = 300
 
-def getElements(data, n):
-    for i in range(0, len(data), n):
-        yield data[i:i+n]
+DATA_DIR = './Data/Raw'
 
-query = {
-  "query": 
-  {
-            "filters" : 
-            { 
-                "trade_filters": {"filters": {"indexed": {"option": "1hour"}}},
-                #"type_filters" : {"filters": {"category": {"option": "weapon.bow"}, "rarity": {"option": "nonunique"}}}
-            }
-   },
-  "sort": {"indexed":"asc"}
+def respect_limits(headers: dict):
+    rules = [headers.get("x-rate-limit-account"), headers.get("x-rate-limit-ip")]
+    states = [headers.get("x-rate-limit-account-state"), headers.get("x-rate-limit-ip-state")]
+
+    for rule, state in zip(rules, states):
+        if not rule or not state:
+            continue
+        limit, window, _ = map(int, rule.split(",")[0].split(":"))
+        used, _, _ = map(int, state.split(",")[0].split(":"))
+        if used >= limit - 1:
+            time.sleep(window)
+
+
+def get_elements(data: list, batch_size: int):
+    for i in range(0, len(data), batch_size):
+        yield data[i:i + batch_size]
+
+SEARCH_QUERY = {
+    "query": {
+        "filters": {
+            "trade_filters": {"filters": {"indexed": {"option": "1hour"}}}
+            #"type_filters" : {"filters": {"category": {"option": "weapon.bow"}, "rarity": {"option": "nonunique"}}}
+        }
+    },
+    "sort": {"indexed": "asc"}
 }
 
-searchUrl = f"{BASE}/api/trade2/search/poe2/{LEAGUE}"
-fetchUrl = f"{BASE}/api/trade2/fetch"
 
-dataFromRequests = {"data": []}
-idsTrack = []
+def main():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    search_url = f"{BASE_URL}/api/trade2/search/poe2/{LEAGUE}"
+    fetch_url = f"{BASE_URL}/api/trade2/fetch"
 
-with httpx.Client(http2=True, timeout=20, headers={"User-Agent": UA, "Accept": "application/json"}, cookies=COOKIES) as s:
-    searchDelay = datetime.datetime.now()
-    fetchDelay = datetime.datetime.now()
+    data_from_requests = {"data": []}
+    ids_track = []
 
-    while True:
-        if searchDelay > datetime.datetime.now():
-            secondsToWait = (searchDelay - datetime.datetime.now()).total_seconds();
-            print(f"Has to wait {secondsToWait} before doing another search...")
-            time.sleep(secondsToWait)
+    client_config = {
+        "http2": True,
+        "timeout": 20,
+        "headers": {"User-Agent": USER_AGENT, "Accept": "application/json"},
+        "cookies": COOKIES
+    }
 
-        print("Searching for recent items...")
-        searchResult = s.post(searchUrl, json=query)
-        searchJson = searchResult.json()
-        searchDelay = datetime.datetime.now() + datetime.timedelta(0,8)
-        allIds = searchJson['result']
-        newIds = list(set(allIds) - set(idsTrack))
-        if len(allIds) != len(newIds):
-            print(f"Fetching only {len(newIds)} out of {len(allIds)} due to duplicates...")
-        for ids in getElements(newIds,10):
-            idsString = ",".join(ids)
-            dtn = datetime.datetime.now()
-            if fetchDelay > dtn:
-                diff = fetchDelay - dtn
-                secondsToWait = (fetchDelay - datetime.datetime.now()).total_seconds();
-                print(f"Has to wait {secondsToWait} before doing another fetch...")
-                time.sleep(secondsToWait)
+    with httpx.Client(**client_config) as session:
+        search_delay = datetime.datetime.now()
+        fetch_delay = datetime.datetime.now()
 
-            print(f"Fetching {len(ids)} items...")
-            fetchResult = s.get(f"{fetchUrl}/{idsString}", params={"query": searchJson['id']})
-            fetchDelay = datetime.datetime.now() + datetime.timedelta(0,1)
-            fetchJson = fetchResult.json()
-            dataFromRequests["data"].extend(fetchJson['result'])
-            idsTrack.extend([str(d['id']) for d in fetchJson['result']])
+        while True:
+            now = datetime.datetime.now()
+            if search_delay > now:
+                seconds_to_wait = (search_delay - now).total_seconds()
+                print(f"Has to wait {seconds_to_wait:.1f}s before doing another search...")
+                time.sleep(seconds_to_wait)
 
-        if len(idsTrack) > 400:
-            idsTrack = idsTrack[280:]
+            print("Searching for recent items...")
+            search_result = session.post(search_url, json=SEARCH_QUERY)
+            search_json = search_result.json()
+            search_delay = datetime.datetime.now() + datetime.timedelta(seconds=SEARCH_DELAY_SECONDS)
 
-        if len(dataFromRequests['data']) >= 300:
-            with open(f'random-data-{uuid.uuid4()}.json', 'w', encoding='utf-8') as f:
-                json.dump(dataFromRequests, f, ensure_ascii=False, indent=4)
-            dataFromRequests = {"data": []}
+            all_ids = search_json['result']
+            new_ids = list(set(all_ids) - set(ids_track))
+            if len(all_ids) != len(new_ids):
+                print(f"Fetching only {len(new_ids)} out of {len(all_ids)} due to duplicates...")
+
+            for ids in get_elements(new_ids, FETCH_BATCH_SIZE):
+                ids_string = ",".join(ids)
+                now = datetime.datetime.now()
+                if fetch_delay > now:
+                    seconds_to_wait = (fetch_delay - now).total_seconds()
+                    print(f"Has to wait {seconds_to_wait:.1f}s before doing another fetch...")
+                    time.sleep(seconds_to_wait)
+
+                print(f"Fetching {len(ids)} items...")
+                fetch_result = session.get(f"{fetch_url}/{ids_string}", params={"query": search_json['id']})
+                fetch_delay = datetime.datetime.now() + datetime.timedelta(seconds=FETCH_DELAY_SECONDS)
+                fetch_json = fetch_result.json()
+                data_from_requests["data"].extend(fetch_json['result'])
+                ids_track.extend(str(d['id']) for d in fetch_json['result'])
+
+            if len(ids_track) > MAX_TRACKED_IDS:
+                ids_track = ids_track[TRACKED_IDS_TRIM_SIZE:]
+
+            if len(data_from_requests['data']) >= SAVE_THRESHOLD:
+                filename = os.path.join(DATA_DIR, f'random-data-{uuid.uuid4()}.json')
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(data_from_requests, f, ensure_ascii=False, indent=4)
+                data_from_requests = {"data": []}
+
+
+if __name__ == "__main__":
+    main()
