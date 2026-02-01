@@ -1,301 +1,298 @@
-import json, requests, os, numpy as np, itertools, textwrap, random, re
-from math import log
-from catboost import Pool, CatBoostRegressor
-from Helpers.PriceHelper import getPrice
-from parse import parse, compile
+import json
+import os
+import random
+import re
 
+import numpy as np
+from catboost import Pool, CatBoostRegressor
+
+from Helpers.PriceHelper import getPrice
 from parser import parseMod
 
-requirementsMap = {62: 'level_requirement', 63: 'str_requirement', 64: 'dex_requirement', 65: 'int_requirement'}
+REQUIREMENTS_MAP = {
+    62: 'level_requirement',
+    63: 'str_requirement',
+    64: 'dex_requirement',
+    65: 'int_requirement'
+}
+ARBITRARY_PRICE_MULTIPLIER = 10
 
-def KeepRight(text: str) -> str:
+
+def keep_right(text: str) -> str:
     return re.sub(r'\s+', ' ', re.sub(r'\[([^\]]+)\]', lambda m: m.group(1).split('|')[-1], text)).strip()
 
-def LoadItems(dataDirectory):
+
+def load_items(data_directory: str) -> list:
     items = []
-    for file in os.listdir(dataDirectory):
+    for file in os.listdir(data_directory):
         filename = os.fsdecode(file)
         if not filename.startswith('data-'):
             continue
-        with open(f'{dataDirectory}/{filename}', encoding='utf-8') as f:
-            d = json.load(f)
-            items.extend(d['result'])
+        with open(f'{data_directory}/{filename}', encoding='utf-8') as f:
+            items.extend(json.load(f)['result'])
     random.shuffle(items)
     return items
 
-def GetEmptyVector(possibleModifiers, possibleProperties, possibleStats):
-    obj = {}
-    obj['baseType'] = ''
-    obj['rarity'] = ''
-    obj['ilvi'] = ''
+def get_empty_vector(possible_modifiers: list, possible_properties: list, possible_stats: list) -> dict:
+    obj = {
+        'baseType': '',
+        'rarity': '',
+        'ilvl': '',
+        'corrupted': False,
+        'desecrated': False,
+        'mirrored': False,
+        'sanctified': False,
+        'level_requirement': 0,
+        'dex_requirement': 0,
+        'str_requirement': 0,
+        'int_requirement': 0,
+        'prefixes': 0,
+        'suffixes': 0,
+        'sockets': 0,
+        'pdps': 0,
+        'edps': 0,
+        'dps': 0,
+        'ar': 0,
+        'es': 0,
+        'ev': 0
+    }
 
-    obj['corrupted'] = False
-    obj['desecrated'] = False
-    obj['mirrored'] = False
-    obj['sanctified'] = False
+    for prop in possible_properties:
+        obj[f'prop_{prop}'] = 0
 
-    obj['level_requirement'] = 0
-    obj['dex_requirement'] = 0
-    obj['str_requirement'] = 0
-    obj['int_requirement'] = 0
+    for modifier in possible_modifiers:
+        obj[f'mod_{modifier}_present'] = 0
+        obj[f'mod_{modifier}_fract'] = 0
+        obj[f'mod_{modifier}_desecrated'] = 0
+        obj[f'mod_{modifier}_tier'] = 0
 
-    obj['prefixes'] = 0
-    obj['suffixes'] = 0
-    obj['sockets'] = 0
-
-    obj['pdps'] = 0
-    obj['edps'] = 0
-    obj['dps'] = 0
-
-    obj['ar'] = 0
-    obj['es'] = 0
-    obj['ev'] = 0
-
-    for possibleProperty in possibleProperties:
-        obj[f'prop_{possibleProperty}'] = 0
-
-    for possibleModifier in possibleModifiers:
-        obj[f'mod_{possibleModifier}_present'] = 0
-        obj[f'mod_{possibleModifier}_fract'] = 0
-        obj[f'mod_{possibleModifier}_desecrated'] = 0
-        obj[f'mod_{possibleModifier}_tier'] = 0
-
-    for possibleStat in possibleStats:
-        obj[f'stat_{possibleStat}_value'] = 0
+    for stat in possible_stats:
+        obj[f'stat_{stat}_value'] = 0
 
     return obj
 
-def numerizeProp(valueString):
-    if '%' in valueString:
-        return float(valueString.replace('%',''))
-    if '-' in valueString:
-        vals = valueString.split('-')
-        return (float(vals[1]) + float(vals[0])) / 2
-    if 'Large' in valueString:
+def numerize_prop(value_string: str) -> float:
+    if '%' in value_string:
+        return float(value_string.replace('%', ''))
+    if '-' in value_string:
+        vals = value_string.split('-')
+        return (float(vals[0]) + float(vals[1])) / 2
+    if 'Large' in value_string:
         return 3
-    if 'Medium' in valueString:
+    if 'Medium' in value_string:
         return 2
-    if 'Small' in valueString:
+    if 'Small' in value_string:
         return 1
-    return float(valueString)
+    return float(value_string)
 
-arbitraryPriceMultiplier = 10
-def GetModString(stats):
+
+def get_mod_string(stats: list) -> str:
     return ','.join(stats)
 
-def GetStatStrings(mod):
-    if not 'magnitudes' in mod or mod['magnitudes'] == None:
-        return ''
-    magns = []
+
+def get_stat_strings(mod: dict) -> list:
+    if 'magnitudes' not in mod or mod['magnitudes'] is None:
+        return []
+
+    unique_magns = []
     for magn in mod['magnitudes']:
-        magnValue = magn['hash']
-        if 'fractured' in magnValue or 'desecrated' in magnValue:
-            magnValue = magnValue.replace('fractured', 'explicit').replace('desecrated', 'explicit')
-        if not magnValue in magns:
-            magns.append(magnValue)
-    return magns
+        magn_value = magn['hash']
+        if 'fractured' in magn_value or 'desecrated' in magn_value:
+            magn_value = magn_value.replace('fractured', 'explicit').replace('desecrated', 'explicit')
+        if magn_value not in unique_magns:
+            unique_magns.append(magn_value)
+    return unique_magns
 
-def TrainModel(modelName, dataDirectory, modelSaveDirectory, fieldsSaveDirectory, iterations = 1500, learningRate = 0.15, depth = 6):
-    print(f"Starting training for {modelName}")
+def train_model(model_name: str, data_directory: str, model_save_directory: str,
+                fields_save_directory: str, iterations: int = 1500, learning_rate: float = 0.15,
+                depth: int = 6):
+    print(f"Starting training for {model_name}")
     print('Loading items...')
-    items = LoadItems(dataDirectory)
-    itemVectors = []
-    itemPrices = []
-    possibleProperties = []
-    possibleModifiers = []
-    possibleStats = []
+    items = load_items(data_directory)
+    item_vectors = []
+    item_prices = []
+    possible_properties = []
+    possible_modifiers = []
+    possible_stats = []
 
-    def LoadModifiers():
+    def load_modifiers():
         print('Loading modifiers...')
         for item in items:
             mods = item['item']['extended']['mods']
-            allmods = []
-            for modCategory in ['explicit', 'implicit', 'fractured', 'desecrated']:
-                if modCategory in mods:
-                    allmods.extend(mods[modCategory])
-            for mod in allmods:
-                statStrs = GetStatStrings(mod)
-                modStr = GetModString(statStrs)
-                
-                for statStr in statStrs:
-                    if len(statStr) > 0 and not statStr in possibleStats:
-                        possibleStats.append(statStr)
-                if len(modStr) > 0 and not modStr in possibleModifiers:
-                    possibleModifiers.append(modStr)
+            all_mods = []
+            for mod_category in ['explicit', 'implicit', 'fractured', 'desecrated']:
+                if mod_category in mods:
+                    all_mods.extend(mods[mod_category])
+            for mod in all_mods:
+                stat_strs = get_stat_strings(mod)
+                mod_str = get_mod_string(stat_strs)
+
+                for stat_str in stat_strs:
+                    if stat_str and stat_str not in possible_stats:
+                        possible_stats.append(stat_str)
+                if mod_str and mod_str not in possible_modifiers:
+                    possible_modifiers.append(mod_str)
 
             properties = item['item']['properties']
-            for itemProperty in properties:
-                if 'type' in itemProperty and not itemProperty['type'] in possibleProperties:
-                    possibleProperties.append(itemProperty['type'])
+            for item_property in properties:
+                if 'type' in item_property and item_property['type'] not in possible_properties:
+                    possible_properties.append(item_property['type'])
 
-            possibleModifiers.sort()
-            possibleProperties.sort()
-            possibleStats.sort()
+        possible_modifiers.sort()
+        possible_properties.sort()
+        possible_stats.sort()
 
-    def TransformItems():
+    def transform_items():
         print('Transforming vectors...')
-        itemsCount = len(items)
-        itemsProcessed = 0
+        items_count = len(items)
+        items_processed = 0
         for item in items:
-            itemvector = GetEmptyVector(possibleModifiers, possibleProperties, possibleStats)
-            itemvector['baseType'] = item['item']['baseType']
-            itemvector['rarity'] = item['item']['rarity']
+            item_vector = get_empty_vector(possible_modifiers, possible_properties, possible_stats)
+            item_vector['baseType'] = item['item']['baseType']
+            item_vector['rarity'] = item['item']['rarity']
             if 'sockets' in item['item']:
-                itemvector['sockets'] = len(item['item']['sockets'])
+                item_vector['sockets'] = len(item['item']['sockets'])
             if 'ilvl' in item['item']:
-                itemvector['ilvl'] = item['item']['ilvl']
+                item_vector['ilvl'] = item['item']['ilvl']
 
-            # Requirements
             if 'requirements' in item['item']:
-                requirements = item['item']['requirements']
-                for reqirement in requirements:
-                    if not reqirement['type'] in requirementsMap:
-                        print(f'Can not find a requirement {reqirement['type']}')
+                for requirement in item['item']['requirements']:
+                    if requirement['type'] not in REQUIREMENTS_MAP:
+                        print(f"Can not find a requirement {requirement['type']}")
                     else:
-                        itemvector[requirementsMap[reqirement['type']]] = int(reqirement['values'][0][0])
+                        item_vector[REQUIREMENTS_MAP[requirement['type']]] = int(requirement['values'][0][0])
 
-            # Properties
-            for simpleProperty in ['corrupted', 'desecrated', 'mirrored', 'sanctified']:
-                if simpleProperty in item['item']:
-                    itemvector[simpleProperty] = item['item'][simpleProperty]
+            for simple_property in ['corrupted', 'desecrated', 'mirrored', 'sanctified']:
+                if simple_property in item['item']:
+                    item_vector[simple_property] = item['item'][simple_property]
 
-            for extendedProperty in ['pdps', 'edps', 'dps', 'ar', 'es', 'ev']:
-                if extendedProperty in item['item']['extended']:
-                    itemvector[extendedProperty] = item['item']['extended'][extendedProperty]
+            for extended_property in ['pdps', 'edps', 'dps', 'ar', 'es', 'ev']:
+                if extended_property in item['item']['extended']:
+                    item_vector[extended_property] = item['item']['extended'][extended_property]
 
             prefixes = 0
             suffixes = 0
 
-            props = item['item']['properties']
-            for prop in props:
-                if not 'type' in prop:
+            for prop in item['item']['properties']:
+                if 'type' not in prop:
                     continue
-                propVal = 0
-                for x in prop['values']:
-                    propVal+= numerizeProp(x[0])
-                itemvector[f'prop_{prop['type']}'] = propVal
+                prop_val = sum(numerize_prop(x[0]) for x in prop['values'])
+                item_vector[f"prop_{prop['type']}"] = prop_val
 
-            # Mods
             mods = item['item']['extended']['mods']
-            hashes = item['item']['extended']['hashes']
-            for modCategory in ['explicit', 'implicit', 'fractured', 'desecrated']:
-                if not modCategory in mods:
-                    continue;
-                for mod in mods[modCategory]:
-                    if mod['magnitudes'] == None:
+            for mod_category in ['explicit', 'implicit', 'fractured', 'desecrated']:
+                if mod_category not in mods:
+                    continue
+                for mod in mods[mod_category]:
+                    if mod['magnitudes'] is None:
                         continue
-                    modStr = GetModString(GetStatStrings(mod))
-                    tier = 0 
-                    fractured = 0 
-                    desecrated = 0 
-                    isPrefix = False
-                    isSuffix = False
-                    if mod['tier'] != '':
-                        isPrefix = 'P' in mod['tier']
-                        isSuffix = 'S' in mod['tier']
-                        tier = int(mod['tier'].replace('S','').replace('P',''))
-                    if 'fractured' in modStr:
-                        modStr = modStr.replace('fractured', 'explicit')
-                        fractured = 1 
-                    if 'desecrated' in modStr:
-                        modStr = modStr.replace('desecrated', 'explicit')
-                        desecrated = 1 
+                    mod_str = get_mod_string(get_stat_strings(mod))
+                    tier = 0
+                    fractured = 0
+                    desecrated = 0
+                    is_prefix = False
+                    is_suffix = False
+                    if mod['tier']:
+                        is_prefix = 'P' in mod['tier']
+                        is_suffix = 'S' in mod['tier']
+                        tier = int(mod['tier'].replace('S', '').replace('P', ''))
+                    if 'fractured' in mod_str:
+                        mod_str = mod_str.replace('fractured', 'explicit')
+                        fractured = 1
+                    if 'desecrated' in mod_str:
+                        mod_str = mod_str.replace('desecrated', 'explicit')
+                        desecrated = 1
 
-                    if f'mod_{modStr}_present' in itemvector:
-                        itemvector[f'mod_{modStr}_present'] = 1
-                        itemvector[f'mod_{modStr}_tier'] = tier
-                        itemvector[f'mod_{modStr}_fract'] = fractured
-                        itemvector[f'mod_{modStr}_desecrated'] = desecrated
+                    if f'mod_{mod_str}_present' in item_vector:
+                        item_vector[f'mod_{mod_str}_present'] = 1
+                        item_vector[f'mod_{mod_str}_tier'] = tier
+                        item_vector[f'mod_{mod_str}_fract'] = fractured
+                        item_vector[f'mod_{mod_str}_desecrated'] = desecrated
                     else:
                         print('stuff not found!')
-                    if isPrefix:
-                        prefixes+=1
-                    if isSuffix:
-                        suffixes+=1
+                    if is_prefix:
+                        prefixes += 1
+                    if is_suffix:
+                        suffixes += 1
 
-            itemvector['prefixes'] = prefixes
-            itemvector['suffixes'] = suffixes
+            item_vector['prefixes'] = prefixes
+            item_vector['suffixes'] = suffixes
 
-            # Stats
             stats = item['item']
-            for modCategory in ['explicitMods', 'implicitMods', 'fracturedMods', 'desecratedMods']:
-                if not modCategory in stats:
-                    continue;
-                for modText in stats[modCategory]:
-                    textToParse = KeepRight(modText)
-                    parsedResult = parseMod(textToParse)
-                    if parsedResult == None:
-                        print(f'Can not parse a mod! Value: {modText}')
-                        continue;
+            for mod_category in ['explicitMods', 'implicitMods', 'fracturedMods', 'desecratedMods']:
+                if mod_category not in stats:
+                    continue
+                for mod_text in stats[mod_category]:
+                    text_to_parse = keep_right(mod_text)
+                    parsed_result = parseMod(text_to_parse)
+                    if parsed_result is None:
+                        print(f'Can not parse a mod! Value: {mod_text}')
+                        continue
 
-                    numericValue = 0
-                    if len(parsedResult['parseResult']) == 0:
-                        numericValue = parsedResult['matchingData'][1]
-                    elif len(parsedResult['parseResult']) == 1:
-                        numericValue = parsedResult['parseResult'][0]
+                    if not parsed_result['parseResult']:
+                        numeric_value = parsed_result['matchingData'][1]
+                    elif len(parsed_result['parseResult']) == 1:
+                        numeric_value = parsed_result['parseResult'][0]
                     else:
-                        numericValue = sum(parsedResult['parseResult']) / len(parsedResult['parseResult'])
+                        numeric_value = sum(parsed_result['parseResult']) / len(parsed_result['parseResult'])
 
-                    statType = ''
-                    if modCategory in ['explicitMods', 'fracturedMods', 'desecratedMods']:
-                        statType = 'explicit'
-                    else:
-                        statType = 'implicit'
-                    
-                    statname = ''
-                    for potentialStatName in parsedResult['matchingData'][3]['ids'][statType]:
-                        if potentialStatName in possibleStats:
-                            statname = potentialStatName
+                    stat_type = 'explicit' if mod_category in ['explicitMods', 'fracturedMods', 'desecratedMods'] else 'implicit'
+
+                    stat_name = ''
+                    for potential_stat_name in parsed_result['matchingData'][3]['ids'][stat_type]:
+                        if potential_stat_name in possible_stats:
+                            stat_name = potential_stat_name
                             break
-                    if len(statname) == 0:
-                        print(f'Couldn\'t find a stat name for the stat! Value: {modText}')
+                    if not stat_name:
+                        print(f"Couldn't find a stat name for the stat! Value: {mod_text}")
 
-                    itemvector[f'stat_{statname}_value'] += numericValue
+                    item_vector[f'stat_{stat_name}_value'] += numeric_value
 
+            item_vectors.append([item_vector[k] for k in item_vector])
 
-            itemVectors.append([itemvector[k] for k in itemvector])
+            price_calculated = np.log1p(getPrice(item['listing']['price']) * ARBITRARY_PRICE_MULTIPLIER)
+            item_prices.append(price_calculated)
+            items_processed += 1
+            if items_processed % 1000 == 0:
+                print(f' Transformed ({items_processed}/{items_count}) items...')
+    def train_and_save_model():
+        eval_set_size = int(len(item_vectors) * 0.1)
 
-            priceCalculated = np.log1p(getPrice(item['listing']['price']) * arbitraryPriceMultiplier)
-            itemPrices.append(priceCalculated)
-            itemsProcessed+=1
-            if itemsProcessed % 1000 == 0:
-                print(f' Transformed ({itemsProcessed}/{itemsCount}) items...')
-    def TrainModel():
-        evalSetSize = int(len(itemVectors) * 0.1)
+        train_vectors = item_vectors[:-eval_set_size] if eval_set_size else item_vectors
+        train_prices = item_prices[:-eval_set_size] if eval_set_size else item_prices
 
-        trainVectors = itemVectors[:-evalSetSize or None]   
-        trainPrices = itemPrices[:-evalSetSize or None]
+        control_vectors = item_vectors[-eval_set_size:]
+        control_prices = item_prices[-eval_set_size:]
 
-        controlVectors = itemVectors[-evalSetSize:]
-        controlPrices = itemPrices[-evalSetSize:]
+        cat_features = [0, 1]
 
-        controlItems = items[-evalSetSize:]
+        model = CatBoostRegressor(
+            iterations=iterations,
+            learning_rate=learning_rate,
+            depth=depth
+        )
 
-        cat_features = [0,1]
+        eval_dataset = Pool(control_vectors, control_prices, cat_features=cat_features)
+        model.fit(train_vectors, train_prices, cat_features=cat_features, eval_set=eval_dataset)
 
-        model = CatBoostRegressor(iterations=iterations,
-                                  learning_rate=learningRate,
-                                  depth=depth)
-
-        eval_dataset = Pool(controlVectors,
-                            controlPrices, 
-                            cat_features=cat_features)
-
-        model.fit(trainVectors, trainPrices, cat_features=cat_features, eval_set=eval_dataset)
-
-        preds = model.predict(controlVectors)
+        preds = model.predict(control_vectors)
         for i in range(preds.size):
-            print(f'{i:>4}. [{"%.1f" % (np.expm1(controlPrices[i])/arbitraryPriceMultiplier):<8} { "%.1f" % (np.expm1(preds[i])/arbitraryPriceMultiplier):<12}] ({"%.1f" % np.abs(float(controlPrices[i]) - preds[i]):>12}) [{controlVectors[i][1]}]')
-                
+            actual = np.expm1(control_prices[i]) / ARBITRARY_PRICE_MULTIPLIER
+            predicted = np.expm1(preds[i]) / ARBITRARY_PRICE_MULTIPLIER
+            diff = np.abs(float(control_prices[i]) - preds[i])
+            print(f'{i:>4}. [{actual:<8.1f} {predicted:<12.1f}] ({diff:>12.1f}) [{control_vectors[i][1]}]')
+
         print('')
 
-        model.save_model(f"{modelSaveDirectory}/{modelName}", format="cbm", pool=trainVectors)
-        with open(f"{fieldsSaveDirectory}/{modelName}.json", 'w', encoding='utf-8') as f:
-            json.dump({'properties': possibleProperties, 'modifiers': possibleModifiers, 'stats': possibleStats}, f, ensure_ascii=False, indent=4)
+        model.save_model(f"{model_save_directory}/{model_name}", format="cbm", pool=train_vectors)
+        with open(f"{fields_save_directory}/{model_name}.json", 'w', encoding='utf-8') as f:
+            json.dump({
+                'properties': possible_properties,
+                'modifiers': possible_modifiers,
+                'stats': possible_stats
+            }, f, ensure_ascii=False, indent=4)
 
-    LoadModifiers()
-    TransformItems();
-    TrainModel();
-    
-    print()
+    load_modifiers()
+    transform_items()
+    train_and_save_model()
 

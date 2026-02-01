@@ -1,4 +1,4 @@
-from PoeTradeAggregator import TrainModel
+from PoeTradeAggregator import train_model
 from parser import initParser, parseMod
 
 import os
@@ -35,5 +35,5 @@ for specificDir in trainDirs:
                 continue
         if IGNORE_EXISTING and os.path.exists(f'{baseTrainModelDir}/{specificDir}/{folder}'):
             continue
-        TrainModel(folder, f'{dirPath}/{folder}', f'{baseTrainModelDir}/{specificDir}', f'{baseExpectedFieldsDir}/{specificDir}', learningRate=0.12, depth=7)
+        train_model(folder, f'{dirPath}/{folder}', f'{baseTrainModelDir}/{specificDir}', f'{baseExpectedFieldsDir}/{specificDir}', learning_rate=0.12, depth=7)
 print()
