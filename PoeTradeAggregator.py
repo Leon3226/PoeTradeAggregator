@@ -16,6 +16,8 @@ REQUIREMENTS_MAP = {
     65: 'int_requirement'
 }
 ARBITRARY_PRICE_MULTIPLIER = 10
+EVAL_SET_RATIO = 0.1
+PROGRESS_REPORT_INTERVAL = 1000
 
 
 def keep_right(text: str) -> str:
@@ -111,9 +113,9 @@ def train_model(model_name: str, data_directory: str, model_save_directory: str,
     items = load_items(data_directory)
     item_vectors = []
     item_prices = []
-    possible_properties = []
-    possible_modifiers = []
-    possible_stats = []
+    possible_properties = set()
+    possible_modifiers = set()
+    possible_stats = set()
 
     def load_modifiers():
         print('Loading modifiers...')
@@ -126,23 +128,20 @@ def train_model(model_name: str, data_directory: str, model_save_directory: str,
             for mod in all_mods:
                 stat_strs = get_stat_strings(mod)
                 mod_str = get_mod_string(stat_strs)
+                possible_stats.update(s for s in stat_strs if s)
+                if mod_str:
+                    possible_modifiers.add(mod_str)
 
-                for stat_str in stat_strs:
-                    if stat_str and stat_str not in possible_stats:
-                        possible_stats.append(stat_str)
-                if mod_str and mod_str not in possible_modifiers:
-                    possible_modifiers.append(mod_str)
-
-            properties = item['item']['properties']
-            for item_property in properties:
-                if 'type' in item_property and item_property['type'] not in possible_properties:
-                    possible_properties.append(item_property['type'])
-
-        possible_modifiers.sort()
-        possible_properties.sort()
-        possible_stats.sort()
+            for item_property in item['item']['properties']:
+                if 'type' in item_property:
+                    possible_properties.add(item_property['type'])
 
     def transform_items():
+        nonlocal possible_modifiers, possible_properties, possible_stats
+        possible_modifiers = sorted(possible_modifiers)
+        possible_properties = sorted(possible_properties)
+        possible_stats = sorted(possible_stats)
+
         print('Transforming vectors...')
         items_count = len(items)
         items_processed = 0
@@ -174,7 +173,7 @@ def train_model(model_name: str, data_directory: str, model_save_directory: str,
             suffixes = 0
 
             for prop in item['item']['properties']:
-                if 'type' not in prop:
+                if 'type' not in prop or not prop.get('values'):
                     continue
                 prop_val = sum(numerize_prop(x[0]) for x in prop['values'])
                 item_vector[f"prop_{prop['type']}"] = prop_val
@@ -245,24 +244,31 @@ def train_model(model_name: str, data_directory: str, model_save_directory: str,
                             break
                     if not stat_name:
                         print(f"Couldn't find a stat name for the stat! Value: {mod_text}")
+                        continue
 
                     item_vector[f'stat_{stat_name}_value'] += numeric_value
 
-            item_vectors.append([item_vector[k] for k in item_vector])
+            item_vectors.append(list(item_vector.values()))
 
             price_calculated = np.log1p(getPrice(item['listing']['price']) * ARBITRARY_PRICE_MULTIPLIER)
             item_prices.append(price_calculated)
             items_processed += 1
-            if items_processed % 1000 == 0:
+            if items_processed % PROGRESS_REPORT_INTERVAL == 0:
                 print(f' Transformed ({items_processed}/{items_count}) items...')
+
     def train_and_save_model():
-        eval_set_size = int(len(item_vectors) * 0.1)
+        eval_set_size = int(len(item_vectors) * EVAL_SET_RATIO)
 
-        train_vectors = item_vectors[:-eval_set_size] if eval_set_size else item_vectors
-        train_prices = item_prices[:-eval_set_size] if eval_set_size else item_prices
-
-        control_vectors = item_vectors[-eval_set_size:]
-        control_prices = item_prices[-eval_set_size:]
+        if eval_set_size > 0:
+            train_vectors = item_vectors[:-eval_set_size]
+            train_prices = item_prices[:-eval_set_size]
+            control_vectors = item_vectors[-eval_set_size:]
+            control_prices = item_prices[-eval_set_size:]
+        else:
+            train_vectors = item_vectors
+            train_prices = item_prices
+            control_vectors = []
+            control_prices = []
 
         cat_features = [0, 1]
 
@@ -272,17 +278,19 @@ def train_model(model_name: str, data_directory: str, model_save_directory: str,
             depth=depth
         )
 
-        eval_dataset = Pool(control_vectors, control_prices, cat_features=cat_features)
-        model.fit(train_vectors, train_prices, cat_features=cat_features, eval_set=eval_dataset)
+        if control_vectors:
+            eval_dataset = Pool(control_vectors, control_prices, cat_features=cat_features)
+            model.fit(train_vectors, train_prices, cat_features=cat_features, eval_set=eval_dataset)
 
-        preds = model.predict(control_vectors)
-        for i in range(preds.size):
-            actual = np.expm1(control_prices[i]) / ARBITRARY_PRICE_MULTIPLIER
-            predicted = np.expm1(preds[i]) / ARBITRARY_PRICE_MULTIPLIER
-            diff = np.abs(float(control_prices[i]) - preds[i])
-            print(f'{i:>4}. [{actual:<8.1f} {predicted:<12.1f}] ({diff:>12.1f}) [{control_vectors[i][1]}]')
-
-        print('')
+            preds = model.predict(control_vectors)
+            for i in range(preds.size):
+                actual = np.expm1(control_prices[i]) / ARBITRARY_PRICE_MULTIPLIER
+                predicted = np.expm1(preds[i]) / ARBITRARY_PRICE_MULTIPLIER
+                diff = np.abs(float(control_prices[i]) - preds[i])
+                print(f'{i:>4}. [{actual:<8.1f} {predicted:<12.1f}] ({diff:>12.1f}) [{control_vectors[i][1]}]')
+            print('')
+        else:
+            model.fit(train_vectors, train_prices, cat_features=cat_features)
 
         model.save_model(f"{model_save_directory}/{model_name}", format="cbm", pool=train_vectors)
         with open(f"{fields_save_directory}/{model_name}.json", 'w', encoding='utf-8') as f:

@@ -1,39 +1,44 @@
-from PoeTradeAggregator import train_model
-from parser import initParser, parseMod
-
 import os
 
-initParser();
+from PoeTradeAggregator import train_model
+from parser import initParser
+
+initParser()
 
 TRAIN_GENERIC = True
-TRAIN_UNUIQUE = False
+TRAIN_UNIQUE = False
 IGNORE_EXISTING = False
 
 whitelist = ['Bow']
 exceptions = ['Area Level']
 
-baseDataDir = 'Data/sorted'
-baseExpectedFieldsDir = 'Model/expectedFields'
-baseTrainModelDir = 'Model/gradientBoostModel'
+base_data_dir = 'Data/sorted'
+base_expected_fields_dir = 'Model/expectedFields'
+base_train_model_dir = 'Model/gradientBoostModel'
 
-trainDirs = []
+train_dirs = []
 if TRAIN_GENERIC:
-    trainDirs.append('generic')
-if TRAIN_UNUIQUE:
-    trainDirs.append('unique')
+    train_dirs.append('generic')
+if TRAIN_UNIQUE:
+    train_dirs.append('unique')
 
-whitelistMode = len(whitelist) > 0
-for specificDir in trainDirs:
-    dirPath = f'{baseDataDir}/{specificDir}'
-    for folder in os.listdir(dirPath):
-
-        if whitelistMode:
-            if not folder in whitelist:
+whitelist_mode = len(whitelist) > 0
+for specific_dir in train_dirs:
+    dir_path = f'{base_data_dir}/{specific_dir}'
+    for folder in os.listdir(dir_path):
+        if whitelist_mode:
+            if folder not in whitelist:
                 continue
         else:
             if folder in exceptions:
                 continue
-        if IGNORE_EXISTING and os.path.exists(f'{baseTrainModelDir}/{specificDir}/{folder}'):
+        if IGNORE_EXISTING and os.path.exists(f'{base_train_model_dir}/{specific_dir}/{folder}'):
             continue
-        train_model(folder, f'{dirPath}/{folder}', f'{baseTrainModelDir}/{specificDir}', f'{baseExpectedFieldsDir}/{specificDir}', learning_rate=0.12, depth=7)
-print()
+        train_model(
+            folder,
+            f'{dir_path}/{folder}',
+            f'{base_train_model_dir}/{specific_dir}',
+            f'{base_expected_fields_dir}/{specific_dir}',
+            learning_rate=0.12,
+            depth=7
+        )
