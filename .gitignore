@@ -1,0 +1,13 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/catboost_info
+/Data
+/Helpers/__pycache__
+/Model
+/__pycache__
+/item-vector-data.json
+/PoeTradeAggregator.pyproj
+/PoeTradeAggregator.pyproj.user
+/req.json
