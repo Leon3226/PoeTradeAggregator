@@ -15,9 +15,9 @@ REQUIREMENTS_MAP = {
     64: 'dex_requirement',
     65: 'int_requirement'
 }
-ARBITRARY_PRICE_MULTIPLIER = 10
 EVAL_SET_RATIO = 0.1
 PROGRESS_REPORT_INTERVAL = 1000
+SKIP_STATS = True
 
 
 def keep_right(text: str) -> str:
@@ -89,6 +89,7 @@ def numerize_prop(value_string: str) -> float:
 
 
 def get_mod_string(stats: list) -> str:
+    stats.sort()
     return ','.join(stats)
 
 
@@ -218,39 +219,42 @@ def train_model(model_name: str, data_directory: str, model_save_directory: str,
             item_vector['suffixes'] = suffixes
 
             stats = item['item']
-            for mod_category in ['explicitMods', 'implicitMods', 'fracturedMods', 'desecratedMods']:
-                if mod_category not in stats:
-                    continue
-                for mod_text in stats[mod_category]:
-                    text_to_parse = keep_right(mod_text)
-                    parsed_result = parseMod(text_to_parse)
-                    if parsed_result is None:
-                        print(f'Can not parse a mod! Value: {mod_text}')
+            if not SKIP_STATS:
+                for mod_category in ['explicitMods', 'implicitMods', 'fracturedMods', 'desecratedMods']:
+                    if mod_category not in stats:
                         continue
+                    for mod_text in stats[mod_category]:
+                        text_to_parse = keep_right(mod_text)
+                        parsed_result = parseMod(text_to_parse)
+                        if parsed_result is None:
+                            print(f'Can not parse a mod! Value: {mod_text}')
+                            continue
 
-                    if not parsed_result['parseResult']:
-                        numeric_value = parsed_result['matchingData'][1]
-                    elif len(parsed_result['parseResult']) == 1:
-                        numeric_value = parsed_result['parseResult'][0]
-                    else:
-                        numeric_value = sum(parsed_result['parseResult']) / len(parsed_result['parseResult'])
+                        if not parsed_result['parseResult']:
+                            numeric_value = parsed_result['matchingData'][1]
+                        elif len(parsed_result['parseResult']) == 1:
+                            numeric_value = parsed_result['parseResult'][0]
+                        else:
+                            numeric_value = sum(parsed_result['parseResult']) / len(parsed_result['parseResult'])
 
-                    stat_type = 'explicit' if mod_category in ['explicitMods', 'fracturedMods', 'desecratedMods'] else 'implicit'
+                        stat_type = 'explicit' if mod_category in ['explicitMods', 'fracturedMods', 'desecratedMods'] else 'implicit'
 
-                    stat_name = ''
-                    for potential_stat_name in parsed_result['matchingData'][3]['ids'][stat_type]:
-                        if potential_stat_name in possible_stats:
-                            stat_name = potential_stat_name
-                            break
-                    if not stat_name:
-                        print(f"Couldn't find a stat name for the stat! Value: {mod_text}")
-                        continue
+                        stat_name = ''
+                        if stat_name not in parsed_result['matchingData'][3]['ids']:
+                            continue
+                        for potential_stat_name in parsed_result['matchingData'][3]['ids'][stat_type]:
+                            if potential_stat_name in possible_stats:
+                                stat_name = potential_stat_name
+                                break
+                        if not stat_name:
+                            print(f"Couldn't find a stat name for the stat! Value: {mod_text}")
+                            continue
 
-                    item_vector[f'stat_{stat_name}_value'] += numeric_value
+                        item_vector[f'stat_{stat_name}_value'] += numeric_value
 
             item_vectors.append(list(item_vector.values()))
 
-            price_calculated = np.log1p(getPrice(item['listing']['price']) * ARBITRARY_PRICE_MULTIPLIER)
+            price_calculated = np.log1p(getPrice(item['listing']['price']))
             item_prices.append(price_calculated)
             items_processed += 1
             if items_processed % PROGRESS_REPORT_INTERVAL == 0:
@@ -284,8 +288,8 @@ def train_model(model_name: str, data_directory: str, model_save_directory: str,
 
             preds = model.predict(control_vectors)
             for i in range(preds.size):
-                actual = np.expm1(control_prices[i]) / ARBITRARY_PRICE_MULTIPLIER
-                predicted = np.expm1(preds[i]) / ARBITRARY_PRICE_MULTIPLIER
+                actual = np.expm1(control_prices[i])
+                predicted = np.expm1(preds[i])
                 diff = np.abs(float(control_prices[i]) - preds[i])
                 print(f'{i:>4}. [{actual:<8.1f} {predicted:<12.1f}] ({diff:>12.1f}) [{control_vectors[i][1]}]')
             print('')

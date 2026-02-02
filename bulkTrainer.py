@@ -9,8 +9,8 @@ TRAIN_GENERIC = True
 TRAIN_UNIQUE = False
 IGNORE_EXISTING = False
 
-whitelist = ['Bow']
-exceptions = ['Area Level']
+whitelist = ['Body Armour']
+exceptions = ['Area Level', 'Relic']
 
 base_data_dir = 'Data/sorted'
 base_expected_fields_dir = 'Model/expectedFields'
@@ -39,6 +39,7 @@ for specific_dir in train_dirs:
             f'{dir_path}/{folder}',
             f'{base_train_model_dir}/{specific_dir}',
             f'{base_expected_fields_dir}/{specific_dir}',
+            iterations = 600,
             learning_rate=0.12,
             depth=7
         )
