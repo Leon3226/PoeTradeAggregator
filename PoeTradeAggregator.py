@@ -6,7 +6,7 @@ import re
 import numpy as np
 from catboost import Pool, CatBoostRegressor
 
-from Helpers.PriceHelper import getPrice
+from Helpers.currencyFetcher import CurrencyFetcher
 from parser import parseMod
 
 REQUIREMENTS_MAP = {
@@ -254,7 +254,7 @@ def train_model(model_name: str, data_directory: str, model_save_directory: str,
 
             item_vectors.append(list(item_vector.values()))
 
-            price_calculated = np.log1p(getPrice(item['listing']['price']))
+            price_calculated = np.log1p(CurrencyFetcher.get_price(item['listing']['price']))
             item_prices.append(price_calculated)
             items_processed += 1
             if items_processed % PROGRESS_REPORT_INTERVAL == 0:

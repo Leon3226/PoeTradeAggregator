@@ -3,7 +3,7 @@ import os
 
 DATA_CATEGORIES = ['generic', 'unique']
 EXPECTED_FIELDS_DIR = 'Model/expectedFields'
-OUTPUT_FILE = 'aggregatedData.json'
+OUTPUT_FILE = 'item-vector-data.json'
 
 
 def load_category_data(category: str) -> dict:

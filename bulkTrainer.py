@@ -2,14 +2,16 @@ import os
 
 from PoeTradeAggregator import train_model
 from parser import initParser
+from Helpers.currencyFetcher import CurrencyFetcher
 
 initParser()
+CurrencyFetcher.get_rates()
 
 TRAIN_GENERIC = True
 TRAIN_UNIQUE = False
 IGNORE_EXISTING = False
 
-whitelist = ['Body Armour']
+whitelist = []
 exceptions = ['Area Level', 'Relic']
 
 base_data_dir = 'Data/sorted'
@@ -39,7 +41,7 @@ for specific_dir in train_dirs:
             f'{dir_path}/{folder}',
             f'{base_train_model_dir}/{specific_dir}',
             f'{base_expected_fields_dir}/{specific_dir}',
-            iterations = 600,
+            iterations = 1000,
             learning_rate=0.12,
             depth=7
         )
