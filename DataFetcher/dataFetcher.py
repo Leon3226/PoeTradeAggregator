@@ -9,10 +9,9 @@ import httpx
 USER_AGENT = "gradient-boost-evaluator/0.1 (contact: REDACTED_CONTACT)"
 COOKIES = {"POESESSID": "REDACTED_POESESSID"}
 BASE_URL = "https://www.pathofexile.com"
-LEAGUE = "Fate%20of%20the%20Vaal"
+LEAGUE = "Runes%20of%20Aldur"
 
-SEARCH_DELAY_SECONDS = 8
-FETCH_DELAY_SECONDS = 1
+MIN_DELAY_SECONDS = 0.05
 FETCH_BATCH_SIZE = 10
 MAX_TRACKED_IDS = 400
 TRACKED_IDS_TRIM_SIZE = 280
@@ -20,17 +19,41 @@ SAVE_THRESHOLD = 300
 
 DATA_DIR = './Data/Raw'
 
-def respect_limits(headers: dict):
+def calculate_delay_from_headers(headers: dict) -> float:
+    """Calculate required delay based on rate limit headers. Returns delay in seconds."""
+    max_delay = MIN_DELAY_SECONDS
+
     rules = [headers.get("x-rate-limit-account"), headers.get("x-rate-limit-ip")]
     states = [headers.get("x-rate-limit-account-state"), headers.get("x-rate-limit-ip-state")]
 
     for rule, state in zip(rules, states):
         if not rule or not state:
             continue
-        limit, window, _ = map(int, rule.split(",")[0].split(":"))
-        used, _, _ = map(int, state.split(",")[0].split(":"))
-        if used >= limit - 1:
-            time.sleep(window)
+
+        # Parse all rate limit tiers (format: "limit:window:penalty,limit:window:penalty,...")
+        rule_tiers = rule.split(",")
+        state_tiers = state.split(",")
+
+        for rule_tier, state_tier in zip(rule_tiers, state_tiers):
+            limit, window, penalty = map(int, rule_tier.split(":"))
+            used, _, current_penalty = map(int, state_tier.split(":"))
+
+            # If we're in penalty, wait for the penalty duration
+            if current_penalty > 0:
+                max_delay = max(max_delay, current_penalty)
+                continue
+
+            # Calculate delay to stay under the limit
+            # If approaching the limit, spread remaining requests over the window
+            remaining_requests = limit - used
+            if remaining_requests <= 1:
+                max_delay = max(max_delay, window)
+            elif remaining_requests <= limit * 0.2:  # Under 20% capacity
+                # Be more conservative when running low on quota
+                delay_per_request = window / remaining_requests
+                max_delay = max(max_delay, delay_per_request)
+
+    return max(max_delay, MIN_DELAY_SECONDS)
 
 
 def get_elements(data: list, batch_size: int):
@@ -64,20 +87,20 @@ def main():
     }
 
     with httpx.Client(**client_config) as session:
-        search_delay = datetime.datetime.now()
-        fetch_delay = datetime.datetime.now()
+        next_request_time = datetime.datetime.now()
 
         while True:
             now = datetime.datetime.now()
-            if search_delay > now:
-                seconds_to_wait = (search_delay - now).total_seconds()
+            if next_request_time > now:
+                seconds_to_wait = (next_request_time - now).total_seconds()
                 print(f"Has to wait {seconds_to_wait:.1f}s before doing another search...")
                 time.sleep(seconds_to_wait)
 
             print("Searching for recent items...")
             search_result = session.post(search_url, json=SEARCH_QUERY)
+            delay = calculate_delay_from_headers(dict(search_result.headers))
+            next_request_time = datetime.datetime.now() + datetime.timedelta(seconds=delay)
             search_json = search_result.json()
-            search_delay = datetime.datetime.now() + datetime.timedelta(seconds=SEARCH_DELAY_SECONDS)
 
             all_ids = search_json['result']
             new_ids = list(set(all_ids) - set(ids_track))
@@ -87,14 +110,15 @@ def main():
             for ids in get_elements(new_ids, FETCH_BATCH_SIZE):
                 ids_string = ",".join(ids)
                 now = datetime.datetime.now()
-                if fetch_delay > now:
-                    seconds_to_wait = (fetch_delay - now).total_seconds()
+                if next_request_time > now:
+                    seconds_to_wait = (next_request_time - now).total_seconds()
                     print(f"Has to wait {seconds_to_wait:.1f}s before doing another fetch...")
                     time.sleep(seconds_to_wait)
 
                 print(f"Fetching {len(ids)} items...")
                 fetch_result = session.get(f"{fetch_url}/{ids_string}", params={"query": search_json['id']})
-                fetch_delay = datetime.datetime.now() + datetime.timedelta(seconds=FETCH_DELAY_SECONDS)
+                delay = calculate_delay_from_headers(dict(fetch_result.headers))
+                next_request_time = datetime.datetime.now() + datetime.timedelta(seconds=delay)
                 fetch_json = fetch_result.json()
                 data_from_requests["data"].extend(fetch_json['result'])
                 ids_track.extend(str(d['id']) for d in fetch_json['result'])

@@ -79,6 +79,9 @@ def numerize_prop(value_string: str) -> float:
     if '-' in value_string:
         vals = value_string.split('-')
         return (float(vals[0]) + float(vals[1])) / 2
+    if ' or ' in value_string:
+        vals = value_string.split(' or ')
+        return (float(vals[0]) + float(vals[1])) / 2
     if 'Large' in value_string:
         return 3
     if 'Medium' in value_string:

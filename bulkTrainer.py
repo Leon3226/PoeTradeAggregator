@@ -1,6 +1,6 @@
 import os
 
-from PoeTradeAggregator import train_model
+from training.pipeline import run_pipeline
 from parser import initParser
 from Helpers.currencyFetcher import CurrencyFetcher
 
@@ -12,7 +12,12 @@ TRAIN_UNIQUE = False
 IGNORE_EXISTING = False
 
 whitelist = []
-exceptions = ['Area Level', 'Relic']
+exceptions = [
+    'Area Level',
+    'Relic',
+    # Waystones get mis-sorted under this name by sortRawData's extract_item_type
+    'LimitedRespawn Revives Available',
+]
 
 base_data_dir = 'Data/sorted'
 base_expected_fields_dir = 'Model/expectedFields'
@@ -36,12 +41,12 @@ for specific_dir in train_dirs:
                 continue
         if IGNORE_EXISTING and os.path.exists(f'{base_train_model_dir}/{specific_dir}/{folder}'):
             continue
-        train_model(
+        run_pipeline(
             folder,
             f'{dir_path}/{folder}',
             f'{base_train_model_dir}/{specific_dir}',
             f'{base_expected_fields_dir}/{specific_dir}',
-            iterations = 1000,
+            iterations=1000,
             learning_rate=0.12,
             depth=7
         )

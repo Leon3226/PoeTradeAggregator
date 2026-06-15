@@ -8,7 +8,7 @@ class CurrencyFetcher:
     _cache_duration = timedelta(hours=3)
     
     @classmethod
-    def _fetch_rates(cls, league="Fate of the Vaal"):
+    def _fetch_rates(cls, league="Runes of Aldur"):
         url = f"https://poe.ninja/poe2/api/economy/exchange/current/overview"
         params = {
             "league": league,
@@ -29,7 +29,7 @@ class CurrencyFetcher:
         return rates
     
     @classmethod
-    def get_rates(cls, league="Fate of the Vaal"):
+    def get_rates(cls, league="Runes of Aldur"):
         now = datetime.now()
         if cls._cache_time is None or now - cls._cache_time > cls._cache_duration:
             cls._cache = cls._fetch_rates(league)
@@ -37,7 +37,7 @@ class CurrencyFetcher:
         return cls._cache
     
     @classmethod
-    def get_price(cls, price_raw, league="Fate of the Vaal"):
+    def get_price(cls, price_raw, league="Runes of Aldur"):
         rates = cls.get_rates(league)
         currency = price_raw['currency']
         multiplier = rates.get(currency, 1)
