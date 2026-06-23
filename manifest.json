@@ -1,11 +1,1 @@
-{
-  "channels": {
-    "item_vector_data": {
-      "version": "2026-06-23T175358Z",
-      "url": "https://raw.githubusercontent.com/Leon3226/PoeTradeAggregator/data/item-vector-data.json",
-      "sha256": "3ccb29e40279c6838fb9b511fc4c613989da7d25d1c6bd7ffa5d3130c6625176",
-      "is_zip": false,
-      "force_update_after": "2026-07-07T17:53:58.937364+00:00"
-    }
-  }
-}
+{"channels": {}}
