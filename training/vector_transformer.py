@@ -1,7 +1,6 @@
 """
 Vector transformer module for converting items to feature vectors.
 """
-import re
 import sys
 import os
 from typing import List, Tuple
@@ -10,8 +9,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Helpers.currencyFetcher import CurrencyFetcher
-from parser import parseMod
 from field_calculator import FieldDefinitions, get_mod_string, get_stat_strings
+from stat_value_extractor import extract_stat_values
 
 REQUIREMENTS_MAP = {
     62: 'level_requirement',
@@ -21,11 +20,6 @@ REQUIREMENTS_MAP = {
 }
 
 PROGRESS_REPORT_INTERVAL = 1000
-
-
-def keep_right(text: str) -> str:
-    """Extract the rightmost value from bracketed alternatives."""
-    return re.sub(r'\s+', ' ', re.sub(r'\[([^\]]+)\]', lambda m: m.group(1).split('|')[-1], text)).strip()
 
 
 def numerize_prop(value_string: str) -> float:
@@ -181,38 +175,11 @@ def transform_item(item: dict, fields: FieldDefinitions, skip_stats: bool = True
     item_vector['suffixes'] = suffixes
 
     if not skip_stats:
-        stats = item['item']
-        for mod_category in ['explicitMods', 'implicitMods', 'fracturedMods', 'desecratedMods']:
-            if mod_category not in stats:
-                continue
-            for mod_text in stats[mod_category]:
-                text_to_parse = keep_right(mod_text)
-                parsed_result = parseMod(text_to_parse)
-                if parsed_result is None:
-                    print(f'Cannot parse a mod! Value: {mod_text}')
-                    continue
-
-                if not parsed_result['parseResult']:
-                    numeric_value = parsed_result['matchingData'][1]
-                elif len(parsed_result['parseResult']) == 1:
-                    numeric_value = parsed_result['parseResult'][0]
-                else:
-                    numeric_value = sum(parsed_result['parseResult']) / len(parsed_result['parseResult'])
-
-                stat_type = 'explicit' if mod_category in ['explicitMods', 'fracturedMods', 'desecratedMods'] else 'implicit'
-
-                stat_name = ''
-                if stat_name not in parsed_result['matchingData'][3]['ids']:
-                    continue
-                for potential_stat_name in parsed_result['matchingData'][3]['ids'][stat_type]:
-                    if potential_stat_name in fields.stats:
-                        stat_name = potential_stat_name
-                        break
-                if not stat_name:
-                    print(f"Couldn't find a stat name for the stat! Value: {mod_text}")
-                    continue
-
-                item_vector[f'stat_{stat_name}_value'] += numeric_value
+        for stat_key, value in extract_stat_values(item, fields).items():
+            if stat_key in item_vector:
+                item_vector[stat_key] += value
+            else:
+                print(f'Stat field {stat_key} not found in vector!')
 
     return item_vector
 

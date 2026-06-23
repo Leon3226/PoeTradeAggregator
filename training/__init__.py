@@ -36,6 +36,7 @@ from .vector_transformer import (
     transform_item,
     get_empty_vector
 )
+from .stat_value_extractor import extract_stat_values
 from .model_trainer import (
     TrainingConfig,
     TrainingResult,
@@ -61,6 +62,7 @@ __all__ = [
     'transform_items',
     'transform_item',
     'get_empty_vector',
+    'extract_stat_values',
     'TrainingConfig',
     'TrainingResult',
     'train_model',
