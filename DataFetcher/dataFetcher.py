@@ -5,9 +5,18 @@ import time
 import uuid
 
 import httpx
+from dotenv import load_dotenv
 
-USER_AGENT = "gradient-boost-evaluator/0.1 (contact: REDACTED_CONTACT)"
-COOKIES = {"POESESSID": "REDACTED_POESESSID"}
+load_dotenv()
+
+POE_CONTACT = os.getenv("POE_CONTACT")
+if not POE_CONTACT:
+    raise RuntimeError("POE_CONTACT environment variable is not set (check your .env file)")
+USER_AGENT = f"gradient-boost-evaluator/0.1 (contact: {POE_CONTACT})"
+POESESSID = os.getenv("POESESSID")
+if not POESESSID:
+    raise RuntimeError("POESESSID environment variable is not set (check your .env file)")
+COOKIES = {"POESESSID": POESESSID}
 BASE_URL = "https://www.pathofexile.com"
 LEAGUE = "Runes%20of%20Aldur"
 
