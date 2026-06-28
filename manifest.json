@@ -1,11 +1,11 @@
 {
   "channels": {
     "model_bundle": {
-      "version": "20260623-203731",
-      "url": "https://github.com/Leon3226/PoeTradeAggregator/releases/download/model-20260623-203731/gradientBoostModel-20260623-203731.zip",
-      "sha256": "4a414d207682c5685c136f6aacdf854e517dd7fe5e4199104805de2b7becfb4a",
+      "version": "20260628-221912",
+      "url": "https://github.com/Leon3226/PoeTradeAggregator/releases/download/model-20260628-221912/gradientBoostModel-20260628-221912.zip",
+      "sha256": "64bbf789c98c8450a7cd84940dee1733f1246a16fea92ef000ae55c91bd0fda3",
       "is_zip": true,
-      "force_update_after": "2026-07-07T20:37:40.693159+00:00"
+      "force_update_after": "2026-06-28T22:19:29.536417+00:00"
     }
   }
 }
