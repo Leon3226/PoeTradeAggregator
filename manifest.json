@@ -6,6 +6,13 @@
       "sha256": "64bbf789c98c8450a7cd84940dee1733f1246a16fea92ef000ae55c91bd0fda3",
       "is_zip": true,
       "force_update_after": "2026-06-28T22:19:29.536417+00:00"
+    },
+    "currency_rates": {
+      "version": "2026-06-28T222106Z",
+      "url": "https://raw.githubusercontent.com/Leon3226/PoeTradeAggregator/data/currency-rates.json",
+      "sha256": "a8af5ef915274f63bf6b88650f89fc1daf0c448d1130aa49fd97e26fe59dc863",
+      "is_zip": false,
+      "force_update_after": "2026-06-28T22:21:06.170426+00:00"
     }
   }
 }
